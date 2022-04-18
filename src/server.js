@@ -1,6 +1,6 @@
 import express from "express";
 import http from "http";
-import WebSocket from "ws";
+import SocketIO from "socket.io";
 
 const path = require('path');
 
@@ -11,30 +11,30 @@ app.use('*/js',express.static('public/js'));
 app.get("/", (_ ,res) => res.render("home"));
 app.get("/*", (_, res) => res.redirect("/"));
 
+const httpServer = http.createServer(app);
+const wsServer = SocketIO(httpServer);
 
-const handleListen = () => console.log('Listening on http://localhost:3000');
-
-const server = http.createServer(app);
-const wss =  new WebSocket.Server({server});
-
-const sockets = [];
-
-wss.on("connection", (socket) => {
-    sockets.push(socket);
-    socket["nickname"] = "Anon";
-    socket.on("close",() => console.log("Disconnected from the browser"));
-    socket.on("message",(msg) => {
-        const message = JSON.parse(msg);
-        console.log(message);
-        switch (message.type) {
-            case "new_message":
-                sockets.forEach((aSocket) => aSocket.send(`${sockets["nickname"]}: ${message.payload} `));
-                break;
-            case "nickname":
-                sockets["nickname"] = message.payload;
-                break;
-        }
-    });
+wsServer.on("connection", (socket) => {
+  socket["nickname"] = "Anon";
+  socket.onAny((event) => {
+    console.log(`Socket Event: ${event}`);
+  });
+  socket.on("enter_room", (roomName, done) => {
+    socket.join(roomName);
+    done();
+    socket.to(roomName).emit("welcome", socket.nickname);
+  });
+  socket.on("disconnecting", () => {
+    socket.rooms.forEach((room) =>
+      socket.to(room).emit("bye", socket.nickname)
+    );
+  });
+  socket.on("new_message", (msg, room, done) => {
+    socket.to(room).emit("new_message", `${socket.nickname}: ${msg}`);
+    done();
+  });
+  socket.on("nickname", (nickname) => (socket["nickname"] = nickname));
 });
 
-server.listen(3000, handleListen);
+const handleListen = () => console.log('Listening on http://localhost:3000');
+httpServer.listen(3000, handleListen);
